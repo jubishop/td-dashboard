@@ -40,8 +40,13 @@ take precedence over this block and the foundation pages wherever they differ.
 
 ## Project
 
-td-dashboard will be a web dashboard for every td project on a td-sync
-server: status, history, and quick task cleanup. It has no application, stack,
-or project-specific commands yet, so use the commands in the
-[development workflow](docs/development-workflow.md). Record the stack, its
-commands, and any intentional exceptions here when application code arrives.
+td-dashboard is a web dashboard for every td project on a td-sync server. It
+is one standard-library Python file, `td_dashboard.py`, with tests in `tests/`
+and a systemd unit in `systemd/`. The [development
+workflow](docs/development-workflow.md) has its commands, and the
+[design](docs/design.md) its pages and data access.
+
+- Never write td-sync's data directory. Reads open SQLite read-only in one
+  short transaction.
+- Keep host-specific values, such as host names, out of this public repository;
+  deployments set them in `/etc/default/td-dashboard`.
