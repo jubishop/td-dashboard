@@ -13,13 +13,18 @@ if ! ssh "$host" test -f /etc/default/td-dashboard; then
 fi
 
 remote=$(ssh "$host" mktemp -d)
-scp -q "$root/td_dashboard.py" "$root/systemd/td-dashboard.service" "$host:$remote/"
+# Ship the committed app, never local edits or caches.
+git -C "$root" archive --format=tar HEAD td_dashboard systemd/td-dashboard.service | ssh "$host" tar -x -C "$remote"
 # shellcheck disable=SC2087 # $remote expands locally on purpose.
 ssh "$host" sh -eu <<EOF
 trap 'rm -rf "$remote"' EXIT
-python3 -I -B "$remote/td_dashboard.py" --help >/dev/null
-sudo install -D -m 0644 "$remote/td_dashboard.py" /usr/local/lib/td-dashboard/td_dashboard.py
-sudo install -m 0644 "$remote/td-dashboard.service" /etc/systemd/system/td-dashboard.service
+python3 -I -B "$remote/td_dashboard" --help >/dev/null
+sudo rm -rf /usr/local/lib/td-dashboard.new /usr/local/lib/td-dashboard.old
+sudo cp -R "$remote/td_dashboard" /usr/local/lib/td-dashboard.new
+if [ -e /usr/local/lib/td-dashboard ]; then sudo mv /usr/local/lib/td-dashboard /usr/local/lib/td-dashboard.old; fi
+sudo mv /usr/local/lib/td-dashboard.new /usr/local/lib/td-dashboard
+sudo rm -rf /usr/local/lib/td-dashboard.old
+sudo install -m 0644 "$remote/systemd/td-dashboard.service" /etc/systemd/system/td-dashboard.service
 sudo systemctl daemon-reload
 sudo systemctl enable --quiet td-dashboard.service
 sudo systemctl restart td-dashboard.service

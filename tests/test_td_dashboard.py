@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import sqlite3
@@ -16,19 +16,18 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 
-def load_dashboard() -> ModuleType:
-    script = Path(__file__).parents[1] / "td_dashboard.py"
-    spec = importlib.util.spec_from_file_location("td_dashboard", script)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"could not load {script}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["td_dashboard"] = module
-    spec.loader.exec_module(module)
-    return module
+def load_dashboard() -> SimpleNamespace:
+    """The app's modules, imported the way `python3 td_dashboard` does, with their names in one namespace."""
+    app = str(Path(__file__).parents[1] / "td_dashboard")
+    if app not in sys.path:
+        sys.path.insert(0, app)
+    modules = [importlib.import_module(name) for name in ("store", "render", "pages", "server")]
+    return SimpleNamespace(**{name: value for module in modules for name, value in vars(module).items()
+                              if not name.startswith("__")})
 
 
 dash = load_dashboard()

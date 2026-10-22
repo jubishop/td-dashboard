@@ -40,7 +40,7 @@ serve pages on local ports; they need no td, td-sync, or network.
 ## Runtime and toolchain versions
 
 The application needs Python 3.12 or later and nothing outside the standard
-library. `MINIMUM_PYTHON` in `td_dashboard.py` and `MINIMUM` in
+library. `MINIMUM_PYTHON` in `td_dashboard/__main__.py` and `MINIMUM` in
 `bin/check-application` declare it; both refuse an older Python with the
 version found. CI installs the latest Python 3 release on every run. Deployed
 hosts use their system `/usr/bin/python3`.
@@ -49,7 +49,7 @@ hosts use their system `/usr/bin/python3`.
 
 Deploys are manual: after a change merges, run `bin/deploy` from an
 up-to-date checkout of `main`, as the [README](../README.md#deploy) describes.
-Only `td_dashboard.py` and `systemd/td-dashboard.service` reach the host, so
+Only `td_dashboard/` and `systemd/td-dashboard.service` reach the host, so
 changes to anything else need no deploy. Record a skipped deploy and the last
 deployed revision in the merged change's task.
 

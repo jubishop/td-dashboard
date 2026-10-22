@@ -10,7 +10,7 @@ DynamicUser=yes
 SupplementaryGroups=td-sync
 # Site settings, such as TD_DASHBOARD_OPTIONS=--hosts=pi.local,localhost; bin/deploy never overwrites it.
 EnvironmentFile=/etc/default/td-dashboard
-ExecStart=/usr/bin/python3 -I -B /usr/local/lib/td-dashboard/td_dashboard.py --data-dir /var/lib/td-sync --port 8081 $TD_DASHBOARD_OPTIONS
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/td-dashboard --data-dir /var/lib/td-sync --port 8081 $TD_DASHBOARD_OPTIONS
 Restart=on-failure
 RestartSec=5
 MemoryMax=256M
