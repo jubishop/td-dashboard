@@ -1,0 +1,41 @@
+#!/bin/sh
+# Install or update the td dashboard on its host, then wait for it to report healthy.
+# README.md describes the service and its site settings.
+set -eu
+
+host=${TD_DASHBOARD_HOST:-raspberry-pi}
+url=${TD_DASHBOARD_URL:-http://raspberry-pi.local:8081}
+root=$(cd "$(dirname "$0")/.." && pwd)
+
+if ! ssh "$host" test -f /etc/default/td-dashboard; then
+  echo "$host has no /etc/default/td-dashboard; create it with the host names to answer, as README.md describes." >&2
+  exit 1
+fi
+
+remote=$(ssh "$host" mktemp -d)
+scp -q "$root/td_dashboard.py" "$root/systemd/td-dashboard.service" "$host:$remote/"
+# shellcheck disable=SC2087 # $remote expands locally on purpose.
+ssh "$host" sh -eu <<EOF
+trap 'rm -rf "$remote"' EXIT
+python3 -I -B "$remote/td_dashboard.py" --help >/dev/null
+sudo install -D -m 0644 "$remote/td_dashboard.py" /usr/local/lib/td-dashboard/td_dashboard.py
+sudo install -m 0644 "$remote/td-dashboard.service" /etc/systemd/system/td-dashboard.service
+sudo systemctl daemon-reload
+sudo systemctl enable --quiet td-dashboard.service
+sudo systemctl restart td-dashboard.service
+EOF
+
+attempt=0
+while [ "$attempt" -lt 20 ]; do
+  if health=$(curl -fsS -m 5 "$url/healthz" 2>/dev/null); then
+    echo "$health"
+    echo "td dashboard is healthy at $url"
+    exit 0
+  fi
+  attempt=$((attempt + 1))
+  sleep 1
+done
+echo "td dashboard did not report healthy at $url/healthz" >&2
+curl -sS -m 5 "$url/healthz" >&2 || true
+ssh "$host" sudo journalctl -u td-dashboard -n 30 --no-pager >&2
+exit 1

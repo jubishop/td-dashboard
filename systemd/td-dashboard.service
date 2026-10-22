@@ -1,0 +1,41 @@
+[Unit]
+Description=td dashboard, a read-only view of td-sync data
+Documentation=https://github.com/jubishop/td-dashboard
+Wants=network-online.target
+After=network-online.target td-sync.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+SupplementaryGroups=td-sync
+# Site settings, such as TD_DASHBOARD_OPTIONS=--hosts=pi.local,localhost; bin/deploy never overwrites it.
+EnvironmentFile=/etc/default/td-dashboard
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/td-dashboard/td_dashboard.py --data-dir /var/lib/td-sync --port 8081 $TD_DASHBOARD_OPTIONS
+Restart=on-failure
+RestartSec=5
+MemoryMax=256M
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

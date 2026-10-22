@@ -15,7 +15,7 @@ bin/doctor
 bin/check --full
 ```
 
-Setup needs Git and Python 3.9 or later, and checks also need ShellCheck.
+Setup needs Git and Python 3.12 or later, and checks also need ShellCheck.
 `bin/setup` then runs an executable `bin/setup-application`, when present, for
 application dependencies such as `npm ci`.
 QMD and direnv are optional; setup reports skipped features. Install td and
@@ -25,24 +25,33 @@ it before running `direnv allow`; search does not need it.
 
 ## Checks
 
-Follow the [check schedule](foundation/engineering-policy.md#checks). This
-project has no application yet, so it has no `bin/check-application`, and
-`bin/check --full` runs only the foundation checks. When application code
-arrives, add `bin/check-application` and describe what it runs here.
+Follow the [check schedule](foundation/engineering-policy.md#checks).
+`bin/check-application` runs the unit tests in `tests/` with the standard
+library's `unittest`, so `bin/check --full` runs them after the foundation
+checks. Run them alone with:
+
+```sh
+bin/check-application
+```
+
+The tests build small td-sync data directories in temporary folders and
+serve pages on local ports; they need no td, td-sync, or network.
 
 ## Runtime and toolchain versions
 
-No application runtime is declared yet; the foundation tools under
-[Setup](#setup) are the only requirements. When the project adds a runtime or
-toolchain, list its minimum supported version and where it is declared,
-following the
-[version policy](foundation/engineering-policy.md#runtime-and-toolchain-versions).
+The application needs Python 3.12 or later and nothing outside the standard
+library. `MINIMUM_PYTHON` in `td_dashboard.py` and `MINIMUM` in
+`bin/check-application` declare it; both refuse an older Python with the
+version found. CI installs the latest Python 3 release on every run. Deployed
+hosts use their system `/usr/bin/python3`.
 
 ## Deployment
 
-Nothing deploys yet. When the project first deploys, describe how it deploys,
-how nonfunctional changes skip deployment, and the manual override, following
-the [deployment policy](foundation/engineering-policy.md#deployment-decisions).
+Deploys are manual: after a change merges, run `bin/deploy` from an
+up-to-date checkout of `main`, as the [README](../README.md#deploy) describes.
+Only `td_dashboard.py` and `systemd/td-dashboard.service` reach the host, so
+changes to anything else need no deploy. Record a skipped deploy and the last
+deployed revision in the merged change's task.
 
 ## Project Starter
 
