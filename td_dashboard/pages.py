@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import secrets
 import sqlite3
 import threading
 import time
@@ -18,12 +19,15 @@ from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from render import (
-    Clock, DEFAULT_RANGE, RANGES, active_table, activity_feed, card, column_chart, esc, issue_link, linkify,
-    priority_text, range_filter, repo_href, sparkline, status_chip, tiles,
+    ACTIONS, Clock, DEFAULT_RANGE, RANGES, action_form, active_table, activity_feed, card, column_chart, esc,
+    freshness_flag, issue_chip, issue_href, issue_link, linkify, priority_text, range_filter, repo_href, sparkline,
+    tiles,
 )
 from store import (
-    ACTIVE, Issue, Project, STATUSES, STATUS_LABELS, Store, active_sort_key, bucketize, counts, range_start,
+    ACTIVE, Issue, Project, STATUSES, STATUS_LABELS, Store, active_sort_key, bucketize, completed, counts,
+    range_start,
 )
+from writer import ActionError, TdWriter
 
 
 REFRESH_SECONDS = 60
@@ -49,7 +53,7 @@ SECURITY_HEADERS = {
     "Content-Security-Policy": ("default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; "
                                 "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"),
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    "Referrer-Policy": "same-origin",
 }
 
 
@@ -59,15 +63,55 @@ class Response:
     body: bytes
     content_type: str = "text/html; charset=utf-8"
     cache: str = "no-store"
+    location: str = ""
+
+
+@dataclass(frozen=True)
+class Notice:
+    """The outcome of an action, shown once on the page the action returns to."""
+    text: str
+    error: bool = False
+    undo: tuple[str, str] | None = None  # The issue's path and the page to return to after Undo.
+
+
+MAX_FORM_BYTES = 8192
+NOTE_LIMIT = 500
+NOTICE_SECONDS = 600
+MAIN_OPEN = b'<main class="wrap">'
+VERBS = {"done": "close {} as done", "wontdo": "close {} as won't do", "open": "move {} back to open"}
+DONE_TEXT = {"done": "Closed {} as done.", "wontdo": "Closed {} as won't do.", "open": "Moved {} back to open."}
+
+
+def plain(status: int, text: str) -> Response:
+    return Response(status, text.encode() + b"\n", "text/plain; charset=utf-8")
+
+
+def same_origin(origin: str | None, host: str | None) -> bool:
+    """Whether a browser sent the request from one of this dashboard's own pages, which blocks cross-site forms."""
+    if not origin or not host:
+        return False
+    parts = urlsplit(origin)
+    return parts.scheme in ("http", "https") and parts.netloc.lower() == host.strip().lower() and not parts.path
+
+
+def local_path(value: str) -> str:
+    """A same-site path to return to; anything else, such as //host or a full URL, becomes the overview."""
+    if not value.startswith("/") or value.startswith("//") or "\\" in value or any(ord(c) < 32 for c in value):
+        return "/"
+    return value
 
 
 class Dashboard:
     def __init__(self, store: Store, tz: ZoneInfo, sync_url: str, version_file: Path | None,
-                 now=lambda: datetime.now(timezone.utc), hosts: tuple[str, ...] = DEFAULT_HOSTS) -> None:
+                 now=lambda: datetime.now(timezone.utc), hosts: tuple[str, ...] = DEFAULT_HOSTS,
+                 writer: TdWriter | None = None) -> None:
         self.store, self.tz, self.sync_url, self.version_file, self._now = store, tz, sync_url.rstrip("/"), version_file, now
         self.hosts = frozenset(h.lower().rstrip(".") for h in hosts)
+        self.writer = writer
         self._sync_health: tuple[float, bool] = (float("-inf"), False)
         self._sync_lock = threading.Lock()
+        self._notices: dict[str, tuple[float, Notice]] = {}
+        self._notice_lock = threading.Lock()
 
     # Routing
 
@@ -87,6 +131,14 @@ class Dashboard:
             return name in self.hosts
 
     def handle(self, raw_path: str, host: str | None = None) -> Response:
+        response = self.route(raw_path, host)
+        token = parse_qs(urlsplit(raw_path).query).get("notice", [""])[-1]
+        notice = self.recall(token) if token else None
+        if notice and response.content_type.startswith("text/html"):
+            response.body = response.body.replace(MAIN_OPEN, MAIN_OPEN + self.notice_html(notice).encode(), 1)
+        return response
+
+    def route(self, raw_path: str, host: str | None) -> Response:
         if not self.host_allowed(host):
             return Response(HTTPStatus.MISDIRECTED_REQUEST, b"Unknown host\n", "text/plain; charset=utf-8")
         parts = urlsplit(raw_path)
@@ -115,6 +167,74 @@ class Dashboard:
             return Response(HTTPStatus.INTERNAL_SERVER_ERROR, b"Internal error; see the service log\n",
                             "text/plain; charset=utf-8")
 
+    def handle_post(self, raw_path: str, host: str | None, origin: str | None, body: bytes) -> Response:
+        """Apply a task action from a form, then send the browser back to its page with a notice."""
+        if not self.host_allowed(host):
+            return Response(HTTPStatus.MISDIRECTED_REQUEST, b"Unknown host\n", "text/plain; charset=utf-8")
+        if not same_origin(origin, host):
+            return plain(HTTPStatus.FORBIDDEN, "Changes must come from this dashboard's own pages.")
+        if not self.writable():
+            return plain(HTTPStatus.METHOD_NOT_ALLOWED, "This dashboard does not change tasks.")
+        segments = [unquote(s) for s in urlsplit(raw_path).path.split("/") if s]
+        if len(segments) != 3 or segments[0] != "r":
+            return self.not_found("No such page.")
+        form = {key: values[-1] for key, values in parse_qs(body.decode("utf-8", "replace"), max_num_fields=10).items()}
+        action, expect = form.get("action", ""), form.get("expect", "")
+        if action not in ACTIONS or expect not in STATUSES:
+            return plain(HTTPStatus.BAD_REQUEST, "Unknown action or status.")
+        try:
+            project = self.find_project(segments[1])
+        except sqlite3.Error as error:
+            return plain(HTTPStatus.SERVICE_UNAVAILABLE, f"td-sync data is unavailable: {error}")
+        issue = project.issue(segments[2]) if project else None
+        if not project or not issue:
+            return self.not_found("No issue with that ID in this repository.")
+        back = local_path(form.get("back", ""))
+        note = " ".join(form.get("note", "").split())[:NOTE_LIMIT]
+        failed = f"Could not {VERBS[action].format(issue.id)}"
+        try:
+            self.writer.apply(project.id, issue.id, action, expect, note)
+        except ActionError as error:
+            notice = Notice(f"{failed}: {error}", error=True)
+        except Exception:
+            traceback.print_exc()
+            notice = Notice(f"{failed}: unexpected error; see the service log", error=True)
+        else:
+            undo = (issue_href(project.slug, issue.id), back) if action != "open" else None
+            notice = Notice(DONE_TEXT[action].format(issue.id), undo=undo)
+        query = urlencode({"notice": self.remember(notice)})
+        return Response(HTTPStatus.SEE_OTHER, b"", location=f"{back}{'&' if '?' in back else '?'}{query}")
+
+    def writable(self) -> bool:
+        return self.writer is not None and self.writer.status()[0] == "on"
+
+    def remember(self, notice: Notice) -> str:
+        token = secrets.token_urlsafe(12)
+        now = time.monotonic()
+        with self._notice_lock:
+            for key, (made, _) in list(self._notices.items()):
+                if now - made > NOTICE_SECONDS:
+                    del self._notices[key]
+            self._notices[token] = (now, notice)
+        return token
+
+    def recall(self, token: str) -> Notice | None:
+        with self._notice_lock:
+            made, notice = self._notices.get(token, (0.0, None))
+        return notice if notice and time.monotonic() - made <= NOTICE_SECONDS else None
+
+    @staticmethod
+    def notice_html(notice: Notice) -> str:
+        undo = ""
+        if notice.undo:
+            path, back = notice.undo
+            undo = (f'<form method="post" action="{esc(path)}" class="act">'
+                    f'<input type="hidden" name="expect" value="closed"><input type="hidden" name="back" value="{esc(back)}">'
+                    f'<button name="action" value="open" class="secondary">Undo</button></form>')
+        role = "alert" if notice.error else "status"
+        return (f'<section class="notice{" error" if notice.error else ""}" role="{role}"><p>{esc(notice.text)}</p>'
+                f"{undo}</section>")
+
     @staticmethod
     def range_param(query: dict[str, str]) -> int:
         try:
@@ -130,7 +250,7 @@ class Dashboard:
         clock = Clock(self.tz, now)
         issues = [i for p in projects for i in p.issues]
         start = range_start(days, now, self.tz)
-        closed = [i.closed for i in issues if i.closed and i.closed >= start]
+        closed = [c for c in map(completed, issues) if c and c >= start]
         activity = sorted((a for p in projects for a in p.activity), key=lambda a: a.when, reverse=True)
         by_key = {(i.project, i.id): i for i in issues}
         unit = "day" if days <= 30 else "week"
@@ -142,7 +262,8 @@ class Dashboard:
             tiles(counts(issues), len(closed), days),
             card(f"Closed per {unit}", chart, f"{len(closed):,} across {len(projects)} repositories"),
             '<div class="grid-2">',
-            card("Active work", active_table([i for i in issues if i.status in ACTIVE], clock, True),
+            card("Active work", active_table([i for i in issues if i.status in ACTIVE], clock, True,
+                                             self.back("/", days)),
                  f"{sum(i.status in ACTIVE for i in issues)} not closed"),
             card("Recent activity", activity_feed(activity[:12], by_key, clock, True)),
             "</div>",
@@ -160,7 +281,7 @@ class Dashboard:
                          reverse=True)
         for project in ordered:
             c = counts(project.issues)
-            closed_recent = sum(1 for i in project.issues if i.closed and i.closed >= start)
+            closed_recent = sum(1 for c in map(completed, project.issues) if c and c >= start)
             cells = "".join(f'<td class="num{" zero" if not c[s] else ""}">{c[s]}</td>' for s in ACTIVE)
             events = sum(b.count for b in series[project.id])
             rows.append(
@@ -175,6 +296,12 @@ class Dashboard:
                 f'<th class="wide">Activity ({days}d)</th><th class="when">Last activity</th></tr></thead>'
                 f'<tbody>{"".join(rows)}</tbody></table></div>')
 
+    def back(self, path: str, days: int | None = None) -> str | None:
+        """The page an action from a list returns to, or None when the dashboard cannot change tasks."""
+        if not self.writable():
+            return None
+        return f"{path}?{urlencode({'range': days})}" if days and days != DEFAULT_RANGE else path
+
     def find_project(self, slug: str) -> Project | None:
         return next((p for p in self.store.projects() if p.slug == slug), None)
 
@@ -187,10 +314,11 @@ class Dashboard:
         start = range_start(days, now, self.tz)
         recent_closed = sorted((i for i in project.issues if i.closed and i.closed >= start),
                                key=lambda i: i.closed, reverse=True)
+        done = [i.closed for i in recent_closed if not i.wont_do]
         unit = "day" if days <= 30 else "week"
         by_key = {(i.project, i.id): i for i in project.issues}
         closed_rows = "".join(
-            f'<tr><td>{issue_link(i)}</td><td class="wide">{esc(i.type)}</td>'
+            f'<tr><td>{issue_link(i)}{" " + issue_chip(i) if i.wont_do else ""}</td><td class="wide">{esc(i.type)}</td>'
             f'<td class="when">{clock.relative(i.closed)}</td></tr>' for i in recent_closed[:60])
         closed_table = (f'<div class="scroll"><table><thead><tr><th>Issue</th><th class="wide">Type</th>'
                         f'<th class="when">Closed</th></tr></thead><tbody>{closed_rows}</tbody></table></div>'
@@ -200,11 +328,12 @@ class Dashboard:
             f"<h1>{esc(project.name)}</h1>",
             range_filter(days, repo_href(project.slug)),
             self.errors([project]),
-            tiles(counts(project.issues), len(recent_closed), days),
-            card(f"Closed per {unit}", column_chart(bucketize([i.closed for i in recent_closed], days, now, self.tz),
+            tiles(counts(project.issues), len(done), days),
+            card(f"Closed per {unit}", column_chart(bucketize(done, days, now, self.tz),
                                                     "closed", f"Issues closed per {unit} in {project.name}")),
             '<div class="grid-2"><div class="stack">',
-            card("Active work", active_table([i for i in project.issues if i.status in ACTIVE], clock, False)),
+            card("Active work", active_table([i for i in project.issues if i.status in ACTIVE], clock, False,
+                                             self.back(repo_href(project.slug, days)))),
             card(f"Closed in the last {days} days", closed_table,
                  f'<a href="/search?{urlencode({"repo": project.slug, "status": "closed"})}">All closed</a>'),
             "</div>",
@@ -229,7 +358,8 @@ class Dashboard:
             return ", ".join(issue_link(by_key[(slug, i)]) if (slug, i) in by_key else f'<span class="id">{esc(i)}</span>'
                              for i in ids)
 
-        meta = [status_chip(issue.status), f"<span>Priority {priority_text(issue.priority)}</span>",
+        meta = [issue_chip(issue) + freshness_flag(issue, clock.now),
+                f"<span>Priority {priority_text(issue.priority)}</span>",
                 f"<span>{esc(issue.type.capitalize())}</span>"]
         if detail["points"]:
             meta.append(f"<span>{esc(str(detail['points']))} points</span>")
@@ -251,6 +381,13 @@ class Dashboard:
             f'<div class="meta">{"".join(meta)}</div>',
             f'<div class="meta">{"".join(links)}</div>' if links else "",
         ]
+        if self.writable():
+            live = ""
+            if freshness_flag(issue, clock.now).startswith('<span class="flag live"'):
+                live = (f'<p class="live-note">Last activity {clock.relative(issue.last_seen)}: '
+                        "an agent may still be working on it.</p>")
+            body.append(card("Change status", live + f'<div class="issue-actions">'
+                             f'{action_form(issue, issue_href(project.slug, issue.id), note=True)}</div>'))
         if detail["description"]:
             body.append(card("Description", f'<p class="prose">{linkify(detail["description"])}</p>'))
         if detail["acceptance"]:
@@ -287,7 +424,7 @@ class Dashboard:
                 f"{status_options}</select><button>Search</button></form>")
         shown = results[:300]
         rows = "".join(
-            f'<tr><td>{status_chip(i.status)}</td><td class="repo"><a href="{repo_href(i.project)}">{esc(i.project)}</a></td>'
+            f'<tr><td>{issue_chip(i)}</td><td class="repo"><a href="{repo_href(i.project)}">{esc(i.project)}</a></td>'
             f'<td>{issue_link(i)}</td><td class="wide">{priority_text(i.priority)}</td>'
             f'<td class="when">{clock.relative(i.last_change)}</td></tr>' for i in shown)
         if not (text or repo or status):
@@ -316,9 +453,15 @@ class Dashboard:
         except Exception as error:
             traceback.print_exc()
             errors["overview"] = repr(error)
+        actions = "off"
+        if self.writer:
+            state, detail = self.writer.status()
+            actions = {"on": "on", "off": f"off: {detail}"}.get(state, "error")
+            if state == "error":
+                errors["actions"] = detail
         payload = {"status": "error" if errors else "ok", "projects": len(projects),
                    "issues": sum(len(p.issues) for p in projects), "td_sync": "ok" if self.sync_ok() else "down",
-                   "errors": errors}
+                   "actions": actions, "errors": errors}
         return Response(503 if errors else 200, json.dumps(payload).encode(), "application/json")
 
     def not_found(self, message: str) -> Response:

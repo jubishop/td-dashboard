@@ -20,7 +20,7 @@ review, and closed, so closing with a reason is td's own way to abandon work.
 
 | Action | td commands |
 | --- | --- |
-| Done | `td approve` for a task in review, recording Jubi as the reviewer; otherwise `td close` with the note or "Closed as done from the dashboard" |
+| Done | `td approve` for a task in review, recording the dashboard's td session as the reviewer; otherwise `td close` with the note or "Closed as done from the dashboard" |
 | Won't do | `td close -m "Won't do: <note>"`, then `td update --add-label wont-do` |
 | Back to open | `td unstart`, `td unblock`, `td reject`, or `td reopen` for in progress, blocked, in review, or closed; reopening also removes `wont-do` |
 
@@ -29,7 +29,8 @@ fuller editing would add surface that each td upgrade could break. Back to
 open covers a stale task that still needs work, so the next agent picks it up.
 
 Won't do tasks keep the `wont-do` label. The dashboard leaves them out of the
-closure charts and sparklines and shows a Won't do chip. Agents can apply the
+closure charts and counts and shows a Won't do chip. The activity sparklines
+still count their history, like any other activity. Agents can apply the
 same label, and `td list -l wont-do` finds them.
 
 ## Interface
@@ -48,8 +49,9 @@ A task's last activity is the newest of its update time, logs, handoffs,
 comments, reviews, and status changes, close to how `td unstart --stale`
 judges whether a session is alive. A task in progress or in review with no
 activity for 24 hours shows Stale, and the Updated column uses its last
-activity. A task with activity in the last 15 minutes warns that an agent may
-still be working on it.
+activity. A task with activity in the last 15 minutes shows Live, and its issue page
+warns that an agent may still be working on it. On phones, the Updated column
+is hidden so the table fits beside the action menus; the markers remain.
 
 ## Write path
 
@@ -74,7 +76,8 @@ Mac is unreachable and opens a path from the Pi into the Mac.
 Changes need no login, so anyone who can read the dashboard can change a task:
 the home LAN and Jubi's tailnet. The actions are reversible and recorded in
 td history, so a bad click costs little. A change must be a POST whose
-`Origin` is one of the dashboard's own host names, so another web page cannot
-submit one, and the existing Host check against DNS rebinding stays.
+`Origin` matches its `Host`, one of the dashboard's own names, so another web
+page cannot submit one, and the existing Host check against DNS rebinding
+stays.
 Restricting changes to the tailnet and a shared password were rejected as
 more friction than these actions need.

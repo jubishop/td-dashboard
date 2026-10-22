@@ -6,7 +6,9 @@ status: current
 
 The dashboard shows every td project that one td-sync server holds: status,
 active work, and history across all synced repositories. It runs beside
-td-sync and reads td-sync's data directory without ever writing it.
+td-sync and reads td-sync's data directory without ever writing it. It can
+also close and reopen tasks, as [task actions](task-actions.md) describes,
+through the real td.
 
 ## History
 
@@ -70,6 +72,34 @@ columns, but if a query fails, that project shows an error on every page and
 On 2026-10-17, with 23 projects and 293 issues, every page rendered in 3–23
 ms on a Raspberry Pi, and the service used about 33 MB of memory.
 
+## Modules
+
+`td_dashboard/` holds one module per area, and each imports only those
+before it:
+
+- `store.py` reads td-sync's data directory.
+- `writer.py` changes tasks with td.
+- `render.py` builds HTML fragments: chips, tables, charts, and forms.
+- `pages.py` routes requests and builds pages, without the HTTP server.
+- `server.py` serves `pages.py` over HTTP, and `__main__.py` parses options.
+- `static/` holds the stylesheet, script, and favicon.
+
+## Changes
+
+`writer.py` runs td as a td-sync device of the dashboard's own, with its own
+device ID and one td workspace per project under `--state-dir`. Each action
+syncs, checks that the task still has the status the page showed, runs td's
+own commands, and syncs again. td-sync applies the push to `project.db` before
+answering it, so the page the browser returns to already shows the change.
+td runs with its key in the environment, never in a file the dashboard
+writes, and with its own background sync off.
+
+Pages post actions as forms. A request is refused unless its `Origin` names
+the same host as its `Host`, so another site cannot submit one. Pages send
+`Referrer-Policy: same-origin`, because under `no-referrer` browsers send
+`Origin: null` even with their own forms. After an action, the browser returns
+to its page with a one-time notice that offers Undo for Done and Won't do.
+
 ## Service
 
 `systemd/td-dashboard.service` runs the app directory installed at
@@ -83,8 +113,11 @@ name:
   capped at 256 MB.
 - `/etc/default/td-dashboard` holds the host's settings in
   `TD_DASHBOARD_OPTIONS`, such as `--hosts`.
+- `StateDirectory=` gives it `/var/lib/td-dashboard` for td's workspaces, and
+  `ImportCredential=` passes the API key in
+  `/etc/credstore/td-dashboard.api-key`, if present.
 
 Like td-sync, it is plain HTTP with no login, so anyone who can reach it can
-read task titles and history. It answers only IP addresses and the names in
+read task titles and history, and, with actions on, close and reopen tasks. It answers only IP addresses and the names in
 `--hosts`, so a web page cannot read it through DNS rebinding. Pages send a
 strict Content Security Policy and load only their own scripts and styles.

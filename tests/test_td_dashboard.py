@@ -25,7 +25,7 @@ def load_dashboard() -> SimpleNamespace:
     app = str(Path(__file__).parents[1] / "td_dashboard")
     if app not in sys.path:
         sys.path.insert(0, app)
-    modules = [importlib.import_module(name) for name in ("store", "render", "pages", "server")]
+    modules = [importlib.import_module(name) for name in ("store", "writer", "render", "pages", "server")]
     return SimpleNamespace(**{name: value for module in modules for name, value in vars(module).items()
                               if not name.startswith("__")})
 

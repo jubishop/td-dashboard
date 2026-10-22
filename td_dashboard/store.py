@@ -25,6 +25,13 @@ STATUS_LABELS = {
 PRIORITIES = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
 
 
+# Closed tasks with this label were abandoned, so closure counts leave them out.
+WONT_DO = "wont-do"
+STALE_AFTER = timedelta(hours=24)
+STALE_STATUSES = ("in_progress", "in_review")
+LIVE_WITHIN = timedelta(minutes=15)
+
+
 def parse_time(value: object) -> datetime | None:
     """Parse td's ISO timestamps; SQLite's naive CURRENT_TIMESTAMP values are UTC."""
     if not value:
@@ -58,10 +65,17 @@ class Issue:
     created: datetime | None
     updated: datetime | None
     closed: datetime | None
+    labels: tuple[str, ...] = ()
+    # The newest of last_change and the issue's logs, handoffs, reviews, and comments.
+    last_seen: datetime | None = None
 
     @property
     def last_change(self) -> datetime | None:
         return max((t for t in (self.updated, self.closed, self.created) if t), default=None)
+
+    @property
+    def wont_do(self) -> bool:
+        return self.status == "closed" and WONT_DO in self.labels
 
 
 @dataclass(frozen=True)
@@ -238,7 +252,7 @@ class Store:
 def load_project(path: Path, project_id: str, slug: str, name: str) -> Project:
     issues, logs, handoffs, reviews, comments = read(
         path,
-        ("select id, title, status, type, priority, parent_id, created_at, updated_at, closed_at"
+        ("select id, title, status, type, priority, parent_id, created_at, updated_at, closed_at, labels"
          " from issues where deleted_at is null", ()),
         ("select issue_id, timestamp, type, message from logs", ()),
         ("select issue_id, timestamp, done, remaining, decisions, uncertain from handoffs", ()),
@@ -246,12 +260,6 @@ def load_project(path: Path, project_id: str, slug: str, name: str) -> Project:
         ("select issue_id, created_at, text from comments", ()),
     )
     project = Project(project_id, slug, name)
-    project.issues = [
-        Issue(slug, row["id"], row["title"] or "", row["status"] or "open", row["type"] or "", row["priority"] or "",
-              row["parent_id"] or "", parse_time(row["created_at"]), parse_time(row["updated_at"]),
-              parse_time(row["closed_at"]) if row["status"] == "closed" else None)
-        for row in issues
-    ]
     activity = []
     for row in logs:
         when = parse_time(row["timestamp"])
@@ -276,14 +284,32 @@ def load_project(path: Path, project_id: str, slug: str, name: str) -> Project:
         if when:
             activity.append(Activity(slug, row["issue_id"] or "", when, "comment", row["text"] or ""))
     project.activity = sorted(activity, key=lambda a: a.when, reverse=True)
+    latest: dict[str, datetime] = {}
+    for item in project.activity:
+        latest.setdefault(item.issue_id, item.when)
+    for row in issues:
+        closed = parse_time(row["closed_at"]) if row["status"] == "closed" else None
+        labels = tuple(label.strip() for label in (row["labels"] or "").split(",") if label.strip())
+        issue = Issue(slug, row["id"], row["title"] or "", row["status"] or "open", row["type"] or "",
+                      row["priority"] or "", row["parent_id"] or "", parse_time(row["created_at"]),
+                      parse_time(row["updated_at"]), closed, labels)
+        seen = max((t for t in (issue.last_change, latest.get(issue.id)) if t), default=None)
+        project.issues.append(replace(issue, last_seen=seen))
     return project
 
 
 def counts(issues: list[Issue]) -> dict[str, int]:
+    """Issues per status; "closed" counts completed work, so abandoned (won't do) tasks are left out."""
     result = dict.fromkeys(STATUSES, 0)
     for issue in issues:
-        result[issue.status if issue.status in result else "open"] += 1
+        if not issue.wont_do:
+            result[issue.status if issue.status in result else "open"] += 1
     return result
+
+
+def completed(issue: Issue) -> datetime | None:
+    """When the issue was closed as done; None while open or when closed as won't do."""
+    return None if issue.wont_do else issue.closed
 
 
 def bucket_spans(days: int, today: date) -> list[tuple[date, date]]:
@@ -311,6 +337,6 @@ def range_start(days: int, now: datetime, tz: ZoneInfo) -> datetime:
 
 
 def active_sort_key(issue: Issue) -> tuple:
-    stamp = issue.last_change.timestamp() if issue.last_change else 0
+    stamp = issue.last_seen.timestamp() if issue.last_seen else 0
     return (ACTIVE.index(issue.status) if issue.status in ACTIVE else len(ACTIVE),
             PRIORITIES.get(issue.priority, 9), -stamp)

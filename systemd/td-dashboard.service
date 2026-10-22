@@ -1,5 +1,5 @@
 [Unit]
-Description=td dashboard, a read-only view of td-sync data
+Description=td dashboard, a view of td-sync data that can close and reopen tasks
 Documentation=https://github.com/jubishop/td-dashboard
 Wants=network-online.target
 After=network-online.target td-sync.service
@@ -10,7 +10,13 @@ DynamicUser=yes
 SupplementaryGroups=td-sync
 # Site settings, such as TD_DASHBOARD_OPTIONS=--hosts=pi.local,localhost; bin/deploy never overwrites it.
 EnvironmentFile=/etc/default/td-dashboard
-ExecStart=/usr/bin/python3 -I -B /usr/local/lib/td-dashboard --data-dir /var/lib/td-sync --port 8081 $TD_DASHBOARD_OPTIONS
+# td's workspaces for changing tasks. Its sync-scoped td-sync API key comes from
+# /etc/credstore/td-dashboard.api-key when installed; without it, changes stay off.
+StateDirectory=td-dashboard
+StateDirectoryMode=0700
+ImportCredential=td-dashboard.api-key
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/td-dashboard --data-dir /var/lib/td-sync --port 8081 \
+    --state-dir /var/lib/td-dashboard --td /usr/local/bin/td --td-key-file %d/td-dashboard.api-key $TD_DASHBOARD_OPTIONS
 Restart=on-failure
 RestartSec=5
 MemoryMax=256M

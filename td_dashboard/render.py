@@ -8,7 +8,10 @@ from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
-from store import ACTIVE, Activity, Bucket, Issue, PRIORITIES, STATUS_LABELS, active_sort_key
+from store import (
+    ACTIVE, Activity, Bucket, Issue, LIVE_WITHIN, PRIORITIES, STALE_AFTER, STALE_STATUSES, STATUS_LABELS,
+    active_sort_key,
+)
 
 
 RANGES = (7, 30, 90)
@@ -68,6 +71,52 @@ def truncate(text: str, limit: int = 160) -> str:
 def status_chip(status: str) -> str:
     key = status if status in STATUS_LABELS else "open"
     return f'<span class="chip s-{key}"><span class="dot" aria-hidden="true"></span>{esc(STATUS_LABELS.get(status, status))}</span>'
+
+
+def issue_chip(issue: Issue) -> str:
+    if issue.wont_do:
+        return f'<span class="chip s-wontdo"><span class="dot" aria-hidden="true"></span>{esc("Won't do")}</span>'
+    return status_chip(issue.status)
+
+
+def freshness_flag(issue: Issue, now: datetime) -> str:
+    """Live while an agent may still be working on the issue; Stale when work in progress has gone quiet."""
+    if not issue.last_seen:
+        return ""
+    idle = now - issue.last_seen
+    if idle <= LIVE_WITHIN:
+        return ('<span class="flag live" title="Activity in the last 15 minutes; an agent may still be working on it">'
+                "Live</span>")
+    if issue.status in STALE_STATUSES and idle >= STALE_AFTER:
+        return '<span class="flag stale" title="No activity for over a day">Stale</span>'
+    return ""
+
+
+ACTIONS = {"done": "Done", "wontdo": "Won't do", "open": "Back to open"}
+SECONDARY = ' class="secondary"'
+
+
+def available_actions(status: str) -> list[tuple[str, str]]:
+    if status == "closed":
+        return [("open", "Reopen")]
+    return [(action, label) for action, label in ACTIONS.items() if action != "open" or status != "open"]
+
+
+def action_form(issue: Issue, back: str, note: bool = False) -> str:
+    """A form that posts one action for the issue, expecting the status the page showed."""
+    buttons = "".join(f'<button name="action" value="{action}"{"" if i == 0 else SECONDARY}>{esc(label)}</button>'
+                      for i, (action, label) in enumerate(available_actions(issue.status)))
+    note_field = ('<input type="text" name="note" maxlength="500" placeholder="Note for td (optional)" '
+                  'aria-label="Note for td (optional)">' if note else "")
+    return (f'<form method="post" action="{issue_href(issue.project, issue.id)}" class="act">'
+            f'<input type="hidden" name="expect" value="{esc(issue.status)}">'
+            f'<input type="hidden" name="back" value="{esc(back)}">{note_field}{buttons}</form>')
+
+
+def action_menu(issue: Issue, back: str) -> str:
+    return (f'<details class="menu"><summary title="Change {esc(issue.id)}" aria-label="Change {esc(issue.id)}">'
+            f'<span aria-hidden="true">⋯</span></summary><div class="menu-panel">{action_form(issue, back)}</div>'
+            "</details>")
 
 
 def priority_text(priority: str) -> str:
@@ -186,20 +235,24 @@ def range_filter(days: int, base: str) -> str:
     return f'<nav class="filters" aria-label="Time range">{"".join(links)}</nav>'
 
 
-def active_table(issues: list[Issue], clock: Clock, show_repo: bool) -> str:
+def active_table(issues: list[Issue], clock: Clock, show_repo: bool, back: str | None = None) -> str:
+    """Issues with their status, freshness, and last activity; with back, each row has an action menu."""
     if not issues:
         return '<p class="empty">Nothing is open. Every task is closed.</p>'
     rows = []
     for issue in sorted(issues, key=active_sort_key):
         repo = (f'<td class="repo"><a href="{repo_href(issue.project)}">{esc(issue.project)}</a></td>'
                 if show_repo else "")
-        rows.append(f"<tr><td>{status_chip(issue.status)}</td>{repo}<td>{issue_link(issue)}</td>"
+        menu = f'<td class="actions">{action_menu(issue, back)}</td>' if back is not None else ""
+        rows.append(f"<tr><td>{issue_chip(issue)}{freshness_flag(issue, clock.now)}</td>{repo}"
+                    f"<td>{issue_link(issue)}</td>"
                     f'<td class="wide">{priority_text(issue.priority)}</td><td class="wide">{esc(issue.type)}</td>'
-                    f'<td class="when">{clock.relative(issue.last_change)}</td></tr>')
+                    f'<td class="when wide">{clock.relative(issue.last_seen)}</td>{menu}</tr>')
     head = "<th>Repository</th>" if show_repo else ""
+    menu_head = '<th class="actions"><span class="sr">Actions</span></th>' if back is not None else ""
     return (f'<div class="scroll"><table><thead><tr><th>Status</th>{head}<th>Issue</th><th class="wide">Priority</th>'
-            f'<th class="wide">Type</th><th class="when">Updated</th></tr></thead><tbody>{"".join(rows)}</tbody>'
-            "</table></div>")
+            f'<th class="wide">Type</th><th class="when wide">Updated</th>{menu_head}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
 KIND_LABELS = {"progress": "Progress", "decision": "Decision", "blocker": "Blocker", "result": "Result",

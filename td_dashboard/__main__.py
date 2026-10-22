@@ -1,10 +1,13 @@
-"""Serve a read-only web dashboard of every td project that td-sync holds.
+"""Serve a web dashboard of every td project that td-sync holds.
 
 td-sync keeps each project's materialized td database at
 <data-dir>/projects/<id>/project.db, its event log beside it in events.db, and
 the project names in <data-dir>/server.db. Every read opens SQLite read-only
 and holds its shared lock for a few milliseconds; td-sync's writers wait up to
 five seconds for a lock, so the dashboard never makes a push fail.
+
+The dashboard never writes that directory. With --state-dir, it changes tasks
+by running the real td as a td-sync device of its own (see TdWriter).
 """
 
 import sys
@@ -21,6 +24,7 @@ from zoneinfo import ZoneInfo
 from pages import DEFAULT_HOSTS, Dashboard
 from server import make_server
 from store import Store
+from writer import TdWriter
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,14 +33,23 @@ def main(argv: list[str] | None = None) -> int:
                         help="td-sync data directory holding server.db and projects/")
     parser.add_argument("--host", default="::")
     parser.add_argument("--port", type=int, default=8081)
-    parser.add_argument("--sync-url", default="http://127.0.0.1:8080", help="td-sync base URL for its health check")
+    parser.add_argument("--sync-url", default="http://127.0.0.1:8080",
+                        help="td-sync base URL for its health check and for td")
     parser.add_argument("--sync-version-file", type=Path, default=Path("/usr/local/lib/td-sync/version"))
     parser.add_argument("--timezone", default="America/Los_Angeles")
     parser.add_argument("--hosts", default=",".join(DEFAULT_HOSTS),
                         help="comma-separated host names to answer besides IP addresses")
+    parser.add_argument("--state-dir", type=Path,
+                        help="writable directory for td's workspaces; enables changing tasks with td")
+    parser.add_argument("--td", default="td", help="the td command, built from td-sync's release")
+    parser.add_argument("--td-key-file", type=Path,
+                        help="file holding a sync-scoped td-sync API key; without it, changes stay off")
     args = parser.parse_args(argv)
+    if args.state_dir and not args.td_key_file:
+        parser.error("--state-dir needs --td-key-file")
+    writer = TdWriter(args.td, args.state_dir, args.sync_url, args.td_key_file) if args.state_dir else None
     dashboard = Dashboard(Store(args.data_dir), ZoneInfo(args.timezone), args.sync_url, args.sync_version_file,
-                          hosts=tuple(h.strip() for h in args.hosts.split(",") if h.strip()))
+                          hosts=tuple(h.strip() for h in args.hosts.split(",") if h.strip()), writer=writer)
     server = make_server(dashboard, args.host, args.port)
     print(f"td dashboard serving {args.data_dir} on port {args.port}", file=sys.stderr, flush=True)
     try:
