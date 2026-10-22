@@ -59,3 +59,5 @@ hand-written pages to bypass failed checks.
 - [Development workflow](development-workflow.md): this project's setup,
   checks, versions, and deployment.
 - [Git remotes](git-remotes.md): the primary remote and fresh-clone setup.
+- [Task actions](task-actions.md): the accepted design for closing, abandoning,
+  and reopening tasks from the dashboard.
