@@ -5,8 +5,10 @@ td-sync server: status, history, and quick task cleanup.
 
 It is a small Python app in `td_dashboard/` that uses only the standard
 library. It runs on the td-sync host and reads td-sync's data directory
-read-only. The [design](docs/design.md) covers its pages, data access, and
-service.
+read-only. To mark a task Done, Won't do, or Back to open, it runs the real
+td as a td-sync device of its own. The [design](docs/design.md) covers its
+pages, data access, and service, and [task actions](docs/task-actions.md)
+covers the changes it can make.
 
 ## Run it
 
@@ -40,8 +42,36 @@ waits for `/healthz`. It targets `raspberry-pi` and `http://raspberry-pi.local:8
 by default; set `TD_DASHBOARD_HOST` and `TD_DASHBOARD_URL` for another host.
 On failure it prints the health response and the service log.
 
-`/healthz` returns JSON counts and td-sync's status, and 503 when td-sync's
-data cannot be read or a page fails to render.
+`/healthz` returns JSON counts, td-sync's status, and whether actions are on,
+and 503 when td-sync's data cannot be read, a page fails to render, or
+actions are set up but td cannot run.
+
+## Turn on task actions
+
+Pages stay read-only until the host has td and an API key for it:
+
+1. Install td built from the same release tag as td-sync at
+   `/usr/local/bin/td`. From a checkout of that tag of
+   [marcus/td](https://github.com/marcus/td), for a 64-bit ARM host:
+
+   ```sh
+   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o td .
+   ```
+
+2. Create a sync-scoped API key on the td-sync host and store it where the
+   unit's `ImportCredential=` finds it, readable only by root:
+
+   ```sh
+   sudo -u td-sync td-sync admin create-key --email <admin-email> --name td-dashboard \
+     --scopes sync --db /var/lib/td-sync/server.db
+   sudo install -d -m 0700 /etc/credstore
+   sudo sh -c 'umask 077; cat > /etc/credstore/td-dashboard.api-key'  # paste the key, then Ctrl-D
+   sudo systemctl restart td-dashboard
+   ```
+
+`/healthz` then reports `"actions": "on"`. The service keeps one td workspace
+per project in `/var/lib/td-dashboard`, made the first time a task in that
+project changes. Upgrade td with td-sync, so both stay on one release.
 
 ## Development
 
