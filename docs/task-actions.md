@@ -21,7 +21,7 @@ review, and closed, so closing with a reason is td's own way to abandon work.
 | Action | td commands |
 | --- | --- |
 | Done | `td approve` for a task in review, recording the dashboard's td session as the reviewer; otherwise `td close` with the note or "Closed as done from the dashboard" |
-| Won't do | `td close -m "Won't do: <note>"`, then `td update --add-label wont-do` |
+| Won't do | `td update --add-label wont-do`, then `td close -m "Won't do: <note>"`; a failed close takes the label back off |
 | Back to open | `td unstart`, `td unblock`, `td reject`, or `td reopen` for in progress, blocked, in review, or closed; reopening also removes `wont-do` |
 
 There is no delete and no other editing. Delete would hide history, and
@@ -49,8 +49,8 @@ A task's last activity is the newest of its update time, logs, handoffs,
 comments, reviews, and status changes, close to how `td unstart --stale`
 judges whether a session is alive. A task in progress or in review with no
 activity for 24 hours shows Stale, and the Updated column uses its last
-activity. A task with activity in the last 15 minutes shows Live, and its issue page
-warns that an agent may still be working on it. On phones, the Updated column
+activity. A task with activity in the last 15 minutes shows Live, and its
+issue page warns that an agent may still be working on it. On phones, the Updated column
 is hidden so the table fits beside the action menus; the markers remain.
 
 ## Write path
@@ -78,6 +78,5 @@ the home LAN and Jubi's tailnet. The actions are reversible and recorded in
 td history, so a bad click costs little. A change must be a POST whose
 `Origin` matches its `Host`, one of the dashboard's own names, so another web
 page cannot submit one, and the existing Host check against DNS rebinding
-stays.
-Restricting changes to the tailnet and a shared password were rejected as
+stays. Restricting changes to the tailnet and a shared password were rejected as
 more friction than these actions need.
