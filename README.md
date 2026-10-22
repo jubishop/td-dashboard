@@ -3,14 +3,15 @@
 A web dashboard for every [td](https://github.com/marcus/td) project on a
 td-sync server: status, history, and quick task cleanup.
 
-It is one Python file, `td_dashboard.py`, that uses only the standard library.
-It runs on the td-sync host and reads td-sync's data directory read-only. The
-[design](docs/design.md) covers its pages, data access, and service.
+It is a small Python app in `td_dashboard/` that uses only the standard
+library. It runs on the td-sync host and reads td-sync's data directory
+read-only. The [design](docs/design.md) covers its pages, data access, and
+service.
 
 ## Run it
 
 ```sh
-python3 td_dashboard.py --data-dir /var/lib/td-sync --port 8081 --hosts pi.local,localhost
+python3 td_dashboard --data-dir /var/lib/td-sync --port 8081 --hosts pi.local,localhost
 ```
 
 It needs Python 3.12 or later and read access to td-sync's data directory.
@@ -33,9 +34,9 @@ Then, from a checkout of `main`:
 bin/deploy
 ```
 
-It copies the script and unit to the host over SSH, checks that the host's
-Python can load the script, installs both, restarts the service, and waits
-for `/healthz`. It targets `raspberry-pi` and `http://raspberry-pi.local:8081`
+It copies the committed app and unit to the host over SSH, checks that the
+host's Python can load the app, installs both, restarts the service, and
+waits for `/healthz`. It targets `raspberry-pi` and `http://raspberry-pi.local:8081`
 by default; set `TD_DASHBOARD_HOST` and `TD_DASHBOARD_URL` for another host.
 On failure it prints the health response and the service log.
 

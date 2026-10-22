@@ -41,8 +41,10 @@ take precedence over this block and the foundation pages wherever they differ.
 ## Project
 
 td-dashboard is a web dashboard for every td project on a td-sync server. It
-is one standard-library Python file, `td_dashboard.py`, with tests in `tests/`
-and a systemd unit in `systemd/`. The [development
+is a standard-library Python app in `td_dashboard/`, run as
+`python3 td_dashboard`, with tests in `tests/` and a systemd unit in
+`systemd/`. Its modules import each other by name, because the service runs
+the directory under `python3 -I`, which adds only that directory to the path. The [development
 workflow](docs/development-workflow.md) has its commands, and the
 [design](docs/design.md) its pages and data access.
 

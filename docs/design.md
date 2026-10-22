@@ -72,8 +72,10 @@ ms on a Raspberry Pi, and the service used about 33 MB of memory.
 
 ## Service
 
-`systemd/td-dashboard.service` runs `/usr/local/lib/td-dashboard/td_dashboard.py`
-with the system's `/usr/bin/python3`:
+`systemd/td-dashboard.service` runs the app directory installed at
+`/usr/local/lib/td-dashboard` with the system's `/usr/bin/python3 -I`. Python
+puts that directory on the import path, so its modules import each other by
+name:
 
 - It runs as a `DynamicUser` in the `td-sync` group, which can read
   td-sync's `0750` data directory and `0640` files. `ProtectSystem=strict`
