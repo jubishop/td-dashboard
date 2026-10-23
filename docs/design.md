@@ -92,6 +92,8 @@ device ID and one td workspace per project under `--state-dir`. Each action
 syncs, checks that the task still has the status the page showed, runs td's
 own commands, and syncs again. td-sync applies the push to `project.db` before
 answering it, so the page the browser returns to already shows the change.
+Approvals name `--reviewer`, when set, with td's `--reviewed-by`, as
+[task actions](task-actions.md#actions) records.
 td runs with its key in the environment, never in a file the dashboard
 writes, and with its own background sync off.
 

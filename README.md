@@ -73,6 +73,14 @@ Pages stay read-only until the host has td and an API key for it:
 per project in `/var/lib/td-dashboard`, made the first time a task in that
 project changes. Upgrade td with td-sync, so both stay on one release.
 
+Done approves a task in review. To have td name a person as its reviewer,
+beside the dashboard's own td session, add `--reviewer` to the site settings,
+quoting a name with spaces:
+
+```sh
+TD_DASHBOARD_OPTIONS=--hosts=pi.local,pi,localhost --reviewer="Pat Doe"
+```
+
 To check the write path, create a throwaway task on the Mac, close it from the
 dashboard, then run a td command in that project on the Mac. The task shows as
 closed there.

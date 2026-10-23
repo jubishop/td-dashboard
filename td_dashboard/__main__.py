@@ -44,10 +44,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--td", default="td", help="the td command, built from td-sync's release")
     parser.add_argument("--td-key-file", type=Path,
                         help="file holding a sync-scoped td-sync API key; without it, changes stay off")
+    parser.add_argument("--reviewer", default="",
+                        help="who td names as the reviewer when Done approves a task in review")
     args = parser.parse_args(argv)
     if args.state_dir and not args.td_key_file:
         parser.error("--state-dir needs --td-key-file")
-    writer = TdWriter(args.td, args.state_dir, args.sync_url, args.td_key_file) if args.state_dir else None
+    writer = (TdWriter(args.td, args.state_dir, args.sync_url, args.td_key_file, args.reviewer)
+              if args.state_dir else None)
     dashboard = Dashboard(Store(args.data_dir), ZoneInfo(args.timezone), args.sync_url, args.sync_version_file,
                           hosts=tuple(h.strip() for h in args.hosts.split(",") if h.strip()), writer=writer)
     server = make_server(dashboard, args.host, args.port)

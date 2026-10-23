@@ -167,6 +167,16 @@ class ActionTests(ActionCase):
         self.assertEqual(self.commands()[-1], ["approve", "td-n1", "--reason", "Approved from the dashboard"])
         self.assertEqual(self.status("news", "td-n1"), "closed")
 
+    def test_done_names_the_deployments_reviewer_when_it_approves(self) -> None:
+        writer = dash.TdWriter(str(self.td), self.state, "http://127.0.0.1:8080", self.key, reviewer="Pat Doe")
+        self.app = dash.Dashboard(self.store, PACIFIC, "http://127.0.0.1:9", None, now=lambda: NOW,
+                                  hosts=("dash.local",), writer=writer)
+        self.act("/r/news/td-n1", "done", "in_review", note="Checked on the Pi")
+        self.assertEqual(self.commands()[-1], ["approve", "td-n1", "--reviewed-by", "Pat Doe",
+                                               "--reason", "Checked on the Pi"])
+        self.act("/r/home/td-a1", "done", "in_progress")
+        self.assertEqual(self.commands()[-1], ["close", "td-a1", "-m", "Closed as done from the dashboard"])
+
     def test_wont_do_labels_and_closes_and_stays_out_of_closure_counts(self) -> None:
         before = self.get("/")[1].split("Closed in 30 days")[1][:80]
         _, body = self.act("/r/home/td-a1", "wontdo", "in_progress", note="Superseded by td-epic")
