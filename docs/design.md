@@ -36,10 +36,11 @@ deployment, not in the code.
   status changes.
 - `/search`: text across IDs, titles, descriptions, acceptance, and labels,
   with repository and status filters.
-- `/healthz`: JSON counts and `td_sync` (`ok` or `down`, from td-sync's own
-  `/healthz`). It returns 503 when `server.db` cannot be read, the overview
-  fails to render, or any project reports an error. A down td-sync does not
-  change the status.
+- `/healthz`: JSON counts, `td_sync` (`ok` or `down`, from td-sync's own
+  `/healthz`), and `actions` (`on`, `off` with its reason, or `error`). It
+  returns 503 when `server.db` cannot be read, the overview fails to render,
+  any project reports an error, or actions are set up but td cannot run. A
+  down td-sync does not change the status.
 
 The overview and repository pages reload every minute while visible, except
 while a form field has focus. Times use `--timezone`, Pacific by default.

@@ -73,6 +73,10 @@ Pages stay read-only until the host has td and an API key for it:
 per project in `/var/lib/td-dashboard`, made the first time a task in that
 project changes. Upgrade td with td-sync, so both stay on one release.
 
+To check the write path, create a throwaway task on the Mac, close it from the
+dashboard, then run a td command in that project on the Mac. The task shows as
+closed there.
+
 ## Development
 
 Run `bin/setup` after cloning; it needs Git and Python 3.12 or later. QMD and
