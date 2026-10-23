@@ -20,9 +20,14 @@ review, and closed, so closing with a reason is td's own way to abandon work.
 
 | Action | td commands |
 | --- | --- |
-| Done | `td approve` for a task in review, recording the dashboard's td session as the reviewer; otherwise `td close` with the note or "Closed as done from the dashboard" |
+| Done | `td approve --reviewed-by "Justin Bishop"` for a task in review; otherwise `td close` with the note or "Closed as done from the dashboard" |
 | Won't do | `td update --add-label wont-do`, then `td close -m "Won't do: <note>"`; a failed close takes the label back off |
 | Back to open | `td unstart`, `td unblock`, `td reject`, or `td reopen` for in progress, blocked, in review, or closed; reopening also removes `wont-do` |
+
+td records that name on the review beside the dashboard's td session, which
+runs the command. The first build recorded only that session. On 2026-10-23
+Jubi confirmed that Done should name Justin Bishop, as accepted; the reason is
+unknown.
 
 There is no delete and no other editing. Delete would hide history, and
 fuller editing would add surface that each td upgrade could break. Back to
