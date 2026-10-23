@@ -39,8 +39,9 @@ class TdWriter:
     and every other device pulls it on its next td command. td-sync keeps the last of two concurrent writes.
     """
 
-    def __init__(self, td: str, state_dir: Path, sync_url: str, key_file: Path) -> None:
+    def __init__(self, td: str, state_dir: Path, sync_url: str, key_file: Path, reviewer: str = "") -> None:
         self.td, self.state_dir, self.sync_url, self.key_file = td, state_dir, sync_url.rstrip("/"), key_file
+        self.reviewer = reviewer
         self.home = state_dir / "home"
         self._lock = threading.Lock()
 
@@ -81,7 +82,7 @@ class TdWriter:
                 raise ActionError(f"{issue_id} is already open")
             failure = None
             try:
-                self._change(run, issue_id, action, status, labels, note)
+                self._change(run, issue_id, action, status, labels, note, self.reviewer)
             except ActionError as error:
                 failure = error
             try:
@@ -94,9 +95,11 @@ class TdWriter:
                 raise failure
 
     @staticmethod
-    def _change(run, issue_id: str, action: str, status: str, labels: list[str], note: str) -> None:
+    def _change(run, issue_id: str, action: str, status: str, labels: list[str], note: str, reviewer: str) -> None:
         if action == "done" and status == "in_review":
-            run("approve", issue_id, "--reason", note or "Approved from the dashboard")
+            # td records the named reviewer beside this device's session, which runs the approval.
+            named = ("--reviewed-by", reviewer) if reviewer else ()
+            run("approve", issue_id, *named, "--reason", note or "Approved from the dashboard")
         elif action == "done":
             run("close", issue_id, "-m", note or "Closed as done from the dashboard")
         elif action == "wontdo":
